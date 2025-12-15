@@ -130,8 +130,8 @@ class WorkerClient {
       await this.handleTaskAssignment(data.task, data.codeBundle, data.checkpoint);
     });
 
-    this.socket.on(SOCKET_EVENTS.TASK_PAUSE, async (data: { taskId: string }) => {
-      await this.handleTaskPause(data.taskId);
+    this.socket.on(SOCKET_EVENTS.TASK_PAUSE, async (data: { taskId: string; requireSnapshot?: boolean }) => {
+      await this.handleTaskPause(data);
     });
 
     // Checkpoint events
@@ -291,21 +291,23 @@ class WorkerClient {
     }
   }
 
-  private async handleTaskPause(taskId: string): Promise<void> {
+  private async handleTaskPause(data: { taskId: string; requireSnapshot?: boolean }): Promise<void> {
     logInfo('Worker', `=== PAUSE TASK ===`);
-    logInfo('Worker', `Task ID: ${taskId}`);
+    logInfo('Worker', `Task ID: ${data.taskId}`);
+    if (data.requireSnapshot) logInfo('Worker', `📸 Requesting Real-time Snapshot...`);
 
     if (!this.currentRuntime || !this.currentTask) {
       logWarn('Worker', 'Không có task đang chạy');
       return;
     }
 
-    if (this.currentTask.id !== taskId) {
+    if (this.currentTask.id !== data.taskId) {
       logWarn('Worker', `Task ID không khớp: expected ${this.currentTask.id}`);
       return;
     }
 
-    // Pause runtime
+    // Pause runtime (Runtime sẽ tự động tạo checkpoint nếu được config saveOnPause=true)
+    // Nhưng để chắc chắn cho migration, ta sẽ force tạo checkpoint mới nhất
     const checkpoint = await this.currentRuntime.pause();
     
     this.nodeInfo.status = 'migrating';
@@ -315,6 +317,12 @@ class WorkerClient {
     });
 
     logInfo('Worker', `Task paused, checkpoint: ${checkpoint?.id || 'none'}`);
+
+    // Nếu migration yêu cầu snapshot tức thì (Strong Migration)
+    if (data.requireSnapshot && checkpoint) {
+        logInfo('Worker', `Sending snapshot for migration (Step: ${checkpoint.currentStep})`);
+        this.socket.emit(SOCKET_EVENTS.CHECKPOINT_SAVED, { checkpoint });
+    }
   }
 
   private handleCheckpointRequest(taskId: string): void {

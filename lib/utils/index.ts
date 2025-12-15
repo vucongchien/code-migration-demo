@@ -120,7 +120,7 @@ export function createCheckpoint(
   sourceNodeId: string,
   metadata?: Record<string, unknown>
 ): ExecutionCheckpoint {
-  return {
+  const checkpoint: ExecutionCheckpoint = {
     id: generateId(),
     taskId,
     currentStep,
@@ -129,7 +129,14 @@ export function createCheckpoint(
     sourceNodeId,
     createdAt: new Date(),
     metadata,
+    checksum: '',
+    timestamp: Date.now(),
   };
+
+  // Calculate checksum
+  checkpoint.checksum = calculateCheckpointChecksum(checkpoint);
+
+  return checkpoint;
 }
 
 /**
@@ -150,6 +157,22 @@ export function deserializeCheckpoint(data: string): ExecutionCheckpoint {
   };
 }
 
+/**
+ * Tính checksum cho checkpoint object
+ */
+export function calculateCheckpointChecksum(checkpoint: ExecutionCheckpoint): string {
+  // Loại bỏ các trường động hoặc không quan trọng để tính checksum ổn định
+  const dataToHash = {
+    taskId: checkpoint.taskId,
+    currentStep: checkpoint.currentStep,
+    totalSteps: checkpoint.totalSteps,
+    variables: checkpoint.variables,
+    sourceNodeId: checkpoint.sourceNodeId,
+    // Không bao gồm id, createdAt, checksum cũ
+  };
+  return generateChecksum(JSON.stringify(dataToHash));
+}
+
 // =============================================================================
 // TASK UTILITIES - Các hàm xử lý task
 // =============================================================================
@@ -160,12 +183,14 @@ export function deserializeCheckpoint(data: string): ExecutionCheckpoint {
 export function createTask(
   name: string,
   code: string,
-  migrationType: MigrationType
+  migrationType: MigrationType,
+  customCode?: string
 ): Task {
   return {
     id: generateId(),
     name,
-    code,
+    code, // Default code (or empty)
+    customCode, // Custom code from user
     status: 'pending',
     migrationType,
     progress: 0,

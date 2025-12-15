@@ -130,6 +130,10 @@ export interface ExecutionCheckpoint {
   createdAt: Date;
   /** Dữ liệu bổ sung cho việc khôi phục */
   metadata?: Record<string, unknown>;
+  /** Checksum để verify tính toàn vẹn dữ liệu (MD5/SHA) */
+  checksum?: string;
+  /** Timestamp tạo checkpoint (để xử lý timeout) */
+  timestamp?: number;
 }
 
 /**

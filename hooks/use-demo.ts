@@ -230,13 +230,13 @@ export function useDemoController(options: UseDemoControllerOptions) {
 
     const task = createTask(
       `Demo ${migrationType === 'strong' ? 'Strong' : 'Weak'} Migration`,
-      customCode || '', // Use custom code or empty string (Coordinator will handle default if empty, but here we prefer customCode field)
-      migrationType
+      customCode || '', 
+      migrationType,
+      customCode
     );
 
     if (customCode) {
-      task.customCode = customCode;
-      task.code = customCode; // Also set code field
+        task.code = customCode; // Ensure main code field is also set
     }
 
     addTask(task);

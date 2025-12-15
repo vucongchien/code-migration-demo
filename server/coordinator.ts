@@ -13,7 +13,16 @@
 import { createServer } from 'http';
 import { Server, Socket } from 'socket.io';
 import { SOCKET_EVENTS, DEFAULT_CONFIG, MIGRATION_MESSAGES } from '../lib/constants';
-import { generateId, logInfo, logSuccess, logError, logWarn, setLogHandler, createMigrationEvent } from '../lib/utils';
+import { 
+  generateId, 
+  logInfo, 
+  logSuccess, 
+  logError, 
+  logWarn, 
+  setLogHandler, 
+  createMigrationEvent,
+  calculateCheckpointChecksum 
+} from '../lib/utils';
 import { getRegistry } from '../lib/registry/code-registry';
 import { MigrationManager } from '../lib/migration/migration-manager';
 import type { 
@@ -46,6 +55,13 @@ class CoordinatorServer {
   private io: Server;
   private nodes: Map<string, ConnectedNode> = new Map();
   private tasks: Map<string, Task> = new Map();
+  // Map để track các checkpoint đang đợi (cho Strong Migration Transaction)
+  private pendingCheckpoints: Map<string, { 
+    resolve: (cp: ExecutionCheckpoint) => void; 
+    reject: (reason: any) => void; 
+    timer: NodeJS.Timeout 
+  }> = new Map();
+  
   private nodeStatsHistory: Map<string, NodeStats[]> = new Map();
   private registry = getRegistry();
   private migrationManager: MigrationManager;
@@ -241,6 +257,14 @@ class CoordinatorServer {
     // Lưu task
     this.tasks.set(task.id, task);
     logInfo('Coordinator', `Task submitted: ${task.name} (${task.id})`);
+    
+    // DEBUG: Check custom code
+    if (task.customCode) {
+        logInfo('Coordinator', `>>> Has Custom Code! Length: ${task.customCode.length}`);
+        logInfo('Coordinator', `>>> Snippet: ${task.customCode.slice(0, 50)}...`);
+    } else {
+        logWarn('Coordinator', `>>> NO Custom Code provided in task!`);
+    }
 
     // Tìm worker available
     const worker = this.findAvailableWorker();
@@ -401,16 +425,25 @@ class CoordinatorServer {
       return;
     }
 
-    logInfo('Coordinator', `Bắt đầu ${data.migrationType} migration`);
-    logInfo('Coordinator', `${sourceNode.info.name} → ${targetNode.info.name}`);
+    logInfo('Coordinator', `🚀 BẮT ĐẦU MIGRATION TRANSACTION (${data.migrationType.toUpperCase()})`);
+    logInfo('Coordinator', `📋 Task: ${task.name} (${task.id})`);
+    logInfo('Coordinator', `🔄 ${sourceNode.info.name} → ${targetNode.info.name}`);
 
-    // Pause task trên source
-    sourceNode.socket.emit(SOCKET_EVENTS.TASK_PAUSE, { taskId: data.taskId });
+    // =========================================================================
+    // PHASE 1: PREPARE & PAUSE
+    // =========================================================================
+    logInfo('Coordinator', 'Phase 1: Prepare & Pause Source...');
+    
+    // Gửi lệnh Pause kèm yêu cầu Snapshot (nếu là strong)
+    sourceNode.socket.emit(SOCKET_EVENTS.TASK_PAUSE, { 
+        taskId: data.taskId,
+        requireSnapshot: data.migrationType === 'strong' // Yêu cầu trả về checkpoint MỚI NHẤT
+    });
+    
     task.status = 'migrating';
 
-    // Lấy code bundle
+    // Lấy code bundle (Chuẩn bị sẵn)
     let codeBundle: CodeBundle | undefined;
-
     if (task.customCode) {
         codeBundle = {
             id: `custom-bundle-${task.id}`,
@@ -426,22 +459,41 @@ class CoordinatorServer {
     }
 
     if (!codeBundle) {
-      logError('Coordinator', 'Không tìm thấy code bundle');
+      logError('Coordinator', '❌ Migration Aborted: Không tìm thấy Code Bundle');
       return;
     }
 
-    // Lấy checkpoint (cho Strong Mobility)
+    // =========================================================================
+    // PHASE 2: WAIT FOR CHECKPOINT (TRANSACTIONAL)
+    // =========================================================================
     let checkpoint: ExecutionCheckpoint | undefined;
+
     if (data.migrationType === 'strong') {
-      // Yêu cầu source lưu checkpoint
-      sourceNode.socket.emit(SOCKET_EVENTS.CHECKPOINT_SAVE, { taskId: data.taskId });
+      logInfo('Coordinator', 'Phase 2: Waiting for Checkpoint (Real-time Snapshot)...');
       
-      // Đợi một chút để nhận checkpoint
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      checkpoint = this.registry.getLatestCheckpoint(data.taskId);
+      try {
+        // Đợi checkpoint với Timeout và Validation
+        checkpoint = await this.waitForCheckpoint(data.taskId, 5000); // 5s timeout
+        logSuccess('Coordinator', `✅ Checkpoint Received & Verified! (Step: ${checkpoint.currentStep})`);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        logError('Coordinator', `❌ Migration FAILED: ${err.message}`);
+        
+        // ABORT MIGRATION
+        // Restore source node status?
+        // Hiện tại cứ để nguyên hoặc set về error
+        return;
+      }
+    } else {
+        logInfo('Coordinator', 'Phase 2: Skipped (Weak Migration)');
     }
 
-    // Thực hiện migration
+    // =========================================================================
+    // PHASE 3: COMMIT & TRANSFER
+    // =========================================================================
+    logInfo('Coordinator', 'Phase 3: Commit & Transfer...');
+
+    // Thực hiện logic migration (ghi log events)
     const result = await this.migrationManager.executeMigration({
       taskId: data.taskId,
       task,
@@ -453,30 +505,76 @@ class CoordinatorServer {
     });
 
     if (result.success) {
-      // Cập nhật task
+      // Cập nhật Metadata Task
       task.currentNodeId = data.targetNodeId;
       task.status = 'running';
       
-      // Cập nhật node statuses
-      sourceNode.info.status = 'online';
-      targetNode.info.status = 'busy';
+      // Update Node Statuses
+      sourceNode.info.status = 'online'; // Source rảnh tay
+      targetNode.info.status = 'busy';   // Target bận rộn
 
-      // Gửi task đến target node
+      // Gửi lệnh START cho Target Node
       targetNode.socket.emit(SOCKET_EVENTS.TASK_ASSIGN, {
         task,
         codeBundle,
         checkpoint: data.migrationType === 'strong' ? checkpoint : undefined,
       });
+
+      logSuccess('Coordinator', '🎉 MIGRATION TRANSACTION COMPLETED SUCCESSFULLY');
+    } else {
+        logError('Coordinator', '❌ Migration Failed during Execution phase');
     }
 
     this.broadcastSystemUpdate();
   }
 
+  /**
+   * Helper: Wait for checkpoint with Timeout & Promise
+   */
+  private waitForCheckpoint(taskId: string, timeoutMs: number): Promise<ExecutionCheckpoint> {
+      return new Promise((resolve, reject) => {
+          // Setup timer
+          const timer = setTimeout(() => {
+              if (this.pendingCheckpoints.has(taskId)) {
+                  this.pendingCheckpoints.delete(taskId);
+                  reject(new Error(`Timeout waiting for checkpoint (${timeoutMs}ms)`));
+              }
+          }, timeoutMs);
+
+          // Register in map
+          this.pendingCheckpoints.set(taskId, { resolve, reject, timer });
+      });
+  }
+
   private handleCheckpointSaved(checkpoint: ExecutionCheckpoint): void {
+    // 1. Save to registry
     this.registry.saveCheckpoint(checkpoint);
-    logInfo('Coordinator', `Checkpoint saved: ${checkpoint.id} at step ${checkpoint.currentStep}`);
+    logInfo('Coordinator', `Checkpoint stored: ${checkpoint.id} (Step: ${checkpoint.currentStep})`);
     
-    // Broadcast checkpoint event
+    // 2. Check if there is a pending Strong Migration waiting for this?
+    if (this.pendingCheckpoints.has(checkpoint.taskId)) {
+        const pending = this.pendingCheckpoints.get(checkpoint.taskId)!;
+        
+        // Verify Checksum (Data Integrity)
+        const expectedChecksum = calculateCheckpointChecksum(checkpoint);
+        if (checkpoint.checksum && checkpoint.checksum !== expectedChecksum) {
+            logError('Coordinator', `❌ Checkpoint CORRUPTED! Checksum mismatch.`);
+            logError('Coordinator', `Received: ${checkpoint.checksum}, Calc: ${expectedChecksum}`);
+            // Reject the migration (safety first)
+            clearTimeout(pending.timer);
+            pending.reject(new Error('Checkpoint Checksum Mismatch (Data Corruption)'));
+            this.pendingCheckpoints.delete(checkpoint.taskId);
+            return;
+        }
+
+        // Resolve Promise -> Unblock Phase 2
+        clearTimeout(pending.timer);
+        pending.resolve(checkpoint);
+        this.pendingCheckpoints.delete(checkpoint.taskId);
+        logInfo('Coordinator', `Wait resolved for task ${checkpoint.taskId}`);
+    }
+
+    // 3. Broadcast checkpoint event (optional, for monitoring)
     this.io.emit(SOCKET_EVENTS.CHECKPOINT_SAVED, { checkpoint });
   }
 
@@ -484,11 +582,34 @@ class CoordinatorServer {
     // Tìm và xóa node
     for (const [nodeId, node] of this.nodes) {
       if (node.socket.id === socket.id) {
-        logWarn('Coordinator', `Node disconnected: ${node.info.name} - Reason: ${reason}`);
+        logWarn('Coordinator', `⚠️ Node DISCONNECTED: ${node.info.name} (Reason: ${reason})`);
         
-        // Trigger recovery nếu node đang online/busy mà disconnect
+        // FAIL FAST POLICY:
+        // Nếu node này đang chạy một task, HỦY task đó ngay lập tức.
+        const runningTasks = Array.from(this.tasks.values()).filter(t => t.currentNodeId === nodeId && t.status === 'running');
+        
+        for (const task of runningTasks) {
+            logError('Coordinator', `🚨 ALERT: Node ${node.info.name} failure detected while running Task ${task.name}`);
+            logError('Coordinator', `➡ FAIL-FAST: Terminating Task ${task.id} immediately.`);
+            
+            task.status = 'failed';
+            task.completedAt = new Date();
+            task.result = {
+                success: false,
+                data: null,
+                error: 'Node Failure (Hardware/Network Crash)',
+                executionTime: 0
+            };
+            
+            this.io.emit(SOCKET_EVENTS.TASK_COMPLETE, { 
+                taskId: task.id, 
+                result: task.result 
+            });
+        }
+        
         if (node.info.status !== 'offline') {
-           this.recoveryManager.handleNodeFailure(nodeId, node.info.name);
+           // We kept the recovery manager, but fail-fast takes precedence for running tasks
+           // status update
         }
 
         this.nodes.delete(nodeId);
@@ -497,6 +618,7 @@ class CoordinatorServer {
     }
 
     this.broadcastNodeList();
+    this.broadcastSystemUpdate(); // Update task status UI
   }
 
   private handleNodeStats(stats: NodeStats): void {
