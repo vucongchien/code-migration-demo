@@ -1,0 +1,38 @@
+{
+  "name": "he-thong-phan-tan-di-tru-ma",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "coordinator": "npx tsx server/coordinator.ts",
+    "worker:a": "WORKER_ID=worker-a WORKER_NAME=\"Worker A\" npx tsx server/worker.ts",
+    "worker:b": "WORKER_ID=worker-b WORKER_NAME=\"Worker B\" npx tsx server/worker.ts",
+    "demo": "concurrently \"npm run coordinator\" \"npm run worker:a\" \"npm run worker:b\" \"npm run dev\""
+  },
+  "dependencies": {
+    "immer": "^11.0.1",
+    "next": "16.0.10",
+    "react": "19.2.1",
+    "react-dom": "19.2.1",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1",
+    "uuid": "^13.0.0",
+    "zustand": "^5.0.9"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/uuid": "^10.0.0",
+    "concurrently": "^9.2.1",
+    "eslint": "^9",
+    "eslint-config-next": "16.0.10",
+    "tailwindcss": "^4",
+    "tsx": "^4.21.0",
+    "typescript": "^5"
+  }
+}
