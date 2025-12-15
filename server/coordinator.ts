@@ -85,7 +85,7 @@ class CoordinatorServer {
       tasks: this.tasks,
       nodes: this.nodes,
       findAvailableWorker: () => this.findAvailableWorker(),
-      assignTaskToNode: (task, worker, checkpoint) => (this as any).assignTaskToNode(task, worker, checkpoint),
+      assignTaskToNode: (task, worker, checkpoint) => this.assignTaskToNode(task, worker, checkpoint),
       broadcastEvent: (event) => this.broadcastEvent(event),
     });
 
@@ -225,21 +225,36 @@ class CoordinatorServer {
     }
 
     // Gán task cho worker
+    this.assignTaskToNode(task, worker);
+
+    // Confirm cho submitter
+    socket.emit(SOCKET_EVENTS.TASK_SUBMITTED, { taskId: task.id, assignedTo: worker.info.id });
+
+    // Broadcast updates
+    this.broadcastSystemUpdate();
+  }
+
+  /**
+   * Helper: Assign task to specific worker
+   */
+  public assignTaskToNode(task: Task, worker: ConnectedNode, checkpoint?: ExecutionCheckpoint): void {
+    const codeBundle = this.registry.getBundle('counting-task');
+    if (!codeBundle) return;
+
     task.status = 'running';
     task.currentNodeId = worker.info.id;
-    task.startedAt = new Date();
+    task.startedAt = new Date(); // Reset start time
     worker.info.status = 'busy';
 
     logInfo('Coordinator', `Gán task ${task.id} cho worker ${worker.info.name}`);
 
-    // Gửi task đến worker
     worker.socket.emit(SOCKET_EVENTS.TASK_ASSIGN, {
       task,
       codeBundle,
+      checkpoint,
     });
 
-    // Confirm cho submitter
-    socket.emit(SOCKET_EVENTS.TASK_SUBMITTED, { taskId: task.id, assignedTo: worker.info.id });
+
 
     // Broadcast updates
     this.broadcastSystemUpdate();
