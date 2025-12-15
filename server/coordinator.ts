@@ -584,35 +584,13 @@ class CoordinatorServer {
       if (node.socket.id === socket.id) {
         logWarn('Coordinator', `⚠️ Node DISCONNECTED: ${node.info.name} (Reason: ${reason})`);
         
-        // FAIL FAST POLICY:
-        // Nếu node này đang chạy một task, HỦY task đó ngay lập tức.
-        const runningTasks = Array.from(this.tasks.values()).filter(t => t.currentNodeId === nodeId && t.status === 'running');
-        
-        for (const task of runningTasks) {
-            logError('Coordinator', `🚨 ALERT: Node ${node.info.name} failure detected while running Task ${task.name}`);
-            logError('Coordinator', `➡ FAIL-FAST: Terminating Task ${task.id} immediately.`);
-            
-            task.status = 'failed';
-            task.completedAt = new Date();
-            task.result = {
-                success: false,
-                data: null,
-                error: 'Node Failure (Hardware/Network Crash)',
-                executionTime: 0
-            };
-            
-            this.io.emit(SOCKET_EVENTS.TASK_COMPLETE, { 
-                taskId: task.id, 
-                result: task.result 
-            });
-        }
-        
-        if (node.info.status !== 'offline') {
-           // We kept the recovery manager, but fail-fast takes precedence for running tasks
-           // status update
-        }
-
+        // Xóa node khỏi danh sách trước để tránh việc nó được chọn làm target cho recovery
         this.nodes.delete(nodeId);
+        
+        // TRIGGER AUTO-RECOVERY (Phoenix Rebirth Policy)
+        // Nếu node này đang chạy task, Recovery Manager sẽ tìm node khác để chạy tiếp
+        this.recoveryManager.handleNodeFailure(nodeId, node.info.name);
+
         break;
       }
     }
