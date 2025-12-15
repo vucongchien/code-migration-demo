@@ -592,7 +592,7 @@ export function DemoControlPanel({
         <h3 className="text-sm font-semibold text-gray-600 mb-2">1. Khởi tạo Task</h3>
         <div className="flex gap-2">
           <button
-            onClick={() => onStartTask('weak', showEditor ? customCode : undefined)}
+            onClick={() => onStartTask('weak', customCode)}
             disabled={disabled || isRunning}
             className="flex-1 px-4 py-3 bg-blue-500 text-white font-semibold rounded-xl
                      hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed
@@ -601,7 +601,7 @@ export function DemoControlPanel({
             🔵 Start (Weak)
           </button>
           <button
-            onClick={() => onStartTask('strong', showEditor ? customCode : undefined)}
+            onClick={() => onStartTask('strong', customCode)}
             disabled={disabled || isRunning}
             className="flex-1 px-4 py-3 bg-purple-500 text-white font-semibold rounded-xl
                      hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed
