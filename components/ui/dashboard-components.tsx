@@ -7,8 +7,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { NodeInfo, Task, MigrationEvent, MigrationType } from '@/lib/types';
-import { NODE_COLORS, STATUS_COLORS } from '@/lib/constants';
+import type { NodeInfo, Task, MigrationEvent, MigrationType, LogEntry, NodeStats } from '@/lib/types';
+import { NODE_COLORS, STATUS_COLORS, DEMO_CODE_TEMPLATES } from '@/lib/constants';
 import { formatTimestamp, getTimeAgo } from '@/lib/utils';
 
 // =============================================================================
@@ -17,12 +17,13 @@ import { formatTimestamp, getTimeAgo } from '@/lib/utils';
 
 interface NodeCardProps {
   node: NodeInfo;
+  stats?: NodeStats;
   isSource?: boolean;
   isTarget?: boolean;
   onClick?: () => void;
 }
 
-export function NodeCard({ node, isSource, isTarget, onClick }: NodeCardProps) {
+export function NodeCard({ node, stats, isSource, isTarget, onClick }: NodeCardProps) {
   const colors = NODE_COLORS[node.role];
   const statusColor = STATUS_COLORS[node.status];
 
@@ -63,6 +64,28 @@ export function NodeCard({ node, isSource, isTarget, onClick }: NodeCardProps) {
         <p><span className="font-medium">Status:</span> {node.status}</p>
         {node.address && (
           <p><span className="font-medium">Địa chỉ:</span> {node.address}</p>
+        )}
+        
+        {/* Stats */}
+        {stats && (
+          <div className="mt-2 pt-2 border-t border-gray-100 text-xs">
+            <div className="flex justify-between mb-1">
+              <span>CPU:</span>
+              <span className="font-mono">{stats.cpuUsage.toFixed(1)}%</span>
+            </div>
+            <div className="flex justify-between mb-1">
+              <span>RAM:</span>
+              <span className="font-mono">
+                {stats.memoryUsage.used}MB / {stats.memoryUsage.total}MB
+              </span>
+            </div>
+            <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-blue-500 transition-all duration-500"
+                style={{ width: `${stats.memoryUsage.percentage}%` }}
+              />
+            </div>
+          </div>
         )}
       </div>
 
@@ -242,6 +265,59 @@ export function EventLog({ events, maxItems = 10 }: EventLogProps) {
 }
 
 // =============================================================================
+// SYSTEM LOG COMPONENT
+// =============================================================================
+
+interface SystemLogProps {
+  logs: LogEntry[];
+  maxItems?: number;
+}
+
+export function SystemLog({ logs, maxItems = 50 }: SystemLogProps) {
+  const displayLogs = logs.slice(0, maxItems);
+
+  const getLogColor = (level: LogEntry['level']) => {
+    switch (level) {
+      case 'error': return 'text-red-600 bg-red-50';
+      case 'warn': return 'text-yellow-600 bg-yellow-50';
+      case 'success': return 'text-green-600 bg-green-50';
+      case 'debug': return 'text-gray-500 bg-gray-50';
+      default: return 'text-gray-700 hover:bg-gray-50';
+    }
+  };
+
+  return (
+    <div className="h-full flex flex-col font-mono text-xs">
+      {displayLogs.length === 0 ? (
+        <div className="flex-1 flex items-center justify-center text-gray-400 italic">
+          No logs available
+        </div>
+      ) : (
+        <div className="space-y-1 overflow-auto max-h-[400px]">
+          {displayLogs.map((log) => (
+            <div 
+              key={log.id} 
+              className={`p-1.5 rounded flex gap-2 items-start ${getLogColor(log.level)}`}
+            >
+              <span className="text-gray-400 shrink-0 select-none">
+                {formatTimestamp(log.timestamp)}
+              </span>
+              <span className="font-bold shrink-0 w-20 truncate" title={log.nodeName}>
+                [{log.nodeName}]
+              </span>
+              <span className="shrink-0 font-semibold w-24 truncate" title={log.context}>
+                {log.context}:
+              </span>
+              <span className="break-all whitespace-pre-wrap">{log.message}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// =============================================================================
 // STATS CARD COMPONENT
 // =============================================================================
 
@@ -394,7 +470,7 @@ export function ConnectionStatus({ isConnected, serverUrl }: ConnectionStatusPro
 // =============================================================================
 
 interface DemoControlPanelProps {
-  onStartTask: (migrationType: MigrationType) => void;
+  onStartTask: (migrationType: MigrationType, customCode?: string) => void;
   onTriggerMigration: (migrationType: MigrationType) => void;
   onReset: () => void;
   isRunning: boolean;
@@ -408,16 +484,55 @@ export function DemoControlPanel({
   isRunning,
   disabled 
 }: DemoControlPanelProps) {
+  const [customCode, setCustomCode] = useState<string>(DEMO_CODE_TEMPLATES.COUNTING_TASK);
+  const [showEditor, setShowEditor] = useState(false);
+
   return (
     <div className="p-6 bg-white rounded-2xl shadow-lg border border-gray-100">
       <h2 className="text-xl font-bold text-gray-800 mb-4">🎮 Demo Controls</h2>
       
+      {/* Code Editor Toggle */}
+      <div className="mb-4">
+        <button
+          onClick={() => setShowEditor(!showEditor)}
+          className="text-sm font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1"
+        >
+          {showEditor ? '🔽 Hide Code Editor' : '▶️ Show Code Editor'}
+        </button>
+        
+        {showEditor && (
+          <div className="mt-2 space-y-2 animate-in slide-in-from-top-2 duration-200">
+            <div className="flex gap-2">
+              <button 
+                onClick={() => setCustomCode(DEMO_CODE_TEMPLATES.COUNTING_TASK)}
+                className="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded border border-gray-300"
+              >
+                Load Counting Task
+              </button>
+              <button 
+                 onClick={() => setCustomCode(DEMO_CODE_TEMPLATES.SUM_TASK)}
+                 className="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded border border-gray-300"
+              >
+                Load Sum Task
+              </button>
+            </div>
+            <textarea
+              value={customCode}
+              onChange={(e) => setCustomCode(e.target.value)}
+              className="w-full h-48 p-3 text-xs font-mono bg-gray-900 text-green-400 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+              placeholder="// Enter custom task code here..."
+              spellCheck={false}
+            />
+          </div>
+        )}
+      </div>
+
       {/* Start Task */}
       <div className="mb-6">
         <h3 className="text-sm font-semibold text-gray-600 mb-2">1. Khởi tạo Task</h3>
         <div className="flex gap-2">
           <button
-            onClick={() => onStartTask('weak')}
+            onClick={() => onStartTask('weak', showEditor ? customCode : undefined)}
             disabled={disabled || isRunning}
             className="flex-1 px-4 py-3 bg-blue-500 text-white font-semibold rounded-xl
                      hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed
@@ -426,7 +541,7 @@ export function DemoControlPanel({
             🔵 Start (Weak)
           </button>
           <button
-            onClick={() => onStartTask('strong')}
+            onClick={() => onStartTask('strong', showEditor ? customCode : undefined)}
             disabled={disabled || isRunning}
             className="flex-1 px-4 py-3 bg-purple-500 text-white font-semibold rounded-xl
                      hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed

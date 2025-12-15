@@ -15,6 +15,7 @@ import {
   NodeCard, 
   TaskCard, 
   EventLog, 
+  SystemLog,
   StatsCard,
   DemoControlPanel,
   ConnectionStatus 
@@ -31,7 +32,7 @@ export default function DashboardPage() {
   const { initMockData } = useMockData();
   
   // Store state
-  const { nodes, tasks, events, stats, isConnected } = useSystemStore();
+  const { nodes, tasks, events, stats, logs, nodeStats, isConnected } = useSystemStore();
 
   // Monitor ID (stable)
   const [monitorId] = useState(() => `monitor-${generateId().slice(0, 8)}`);
@@ -177,6 +178,7 @@ export default function DashboardPage() {
                     <NodeCard
                       key={node.id}
                       node={node}
+                      stats={nodeStats[node.id]}
                       isSource={node.id === sourceNodeId}
                       isTarget={node.id === targetNodeId}
                     />
@@ -234,8 +236,16 @@ export default function DashboardPage() {
             {/* Event Log */}
             <div className="bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10 p-6">
               <h2 className="text-xl font-bold text-white mb-4">📜 Event Log</h2>
-              <div className="max-h-80 overflow-y-auto">
+              <div className="max-h-60 overflow-y-auto mb-4">
                 <EventLog events={events} maxItems={15} />
+              </div>
+            </div>
+
+            {/* System Log */}
+            <div className="bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10 p-6">
+              <h2 className="text-xl font-bold text-white mb-4">🖥️ System Console</h2>
+              <div className="max-h-60 overflow-y-auto bg-black/50 rounded-xl p-2 border border-white/5">
+                <SystemLog logs={logs} maxItems={200} />
               </div>
             </div>
           </div>

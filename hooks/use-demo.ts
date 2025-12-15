@@ -17,7 +17,9 @@ import type {
   MigrationEvent, 
   ExecutionCheckpoint,
   MigrationType,
-  CodeBundle 
+  CodeBundle,
+  LogEntry,
+  NodeStats
 } from '@/lib/types';
 
 // =============================================================================
@@ -43,6 +45,8 @@ export function useSocketConnection(options: UseSocketConnectionOptions) {
     addEvent,
     updateTask,
     addCheckpoint,
+    addLog,
+    updateNodeStats,
     setConnected,
   } = useSystemStore();
 
@@ -135,7 +139,17 @@ export function useSocketConnection(options: UseSocketConnectionOptions) {
       setTasks(data.tasks);
     });
 
-  }, [serverUrl, options.nodeId, options.nodeName, options.role, setNodes, setTasks, addEvent, updateTask, addCheckpoint, setConnected]);
+    // Log events
+    socket.on(SOCKET_EVENTS.LOG_MESSAGE, (log: LogEntry) => {
+      addLog(log);
+    });
+
+    // Node stats events
+    socket.on(SOCKET_EVENTS.NODE_STATS, (stats: NodeStats) => {
+      updateNodeStats(stats);
+    });
+
+  }, [serverUrl, options.nodeId, options.nodeName, options.role, setNodes, setTasks, addEvent, updateTask, addCheckpoint, addLog, updateNodeStats, setConnected]);
 
   const disconnect = useCallback(() => {
     socketRef.current?.disconnect();
@@ -208,7 +222,7 @@ export function useDemoController(options: UseDemoControllerOptions) {
   const workers = nodes.filter(n => n.role === 'worker' && n.status !== 'offline');
 
   // Start new task
-  const startTask = useCallback((migrationType: MigrationType) => {
+  const startTask = useCallback((migrationType: MigrationType, customCode?: string) => {
     if (!options.isConnected || workers.length === 0) {
       console.warn('Cannot start task: not connected or no workers');
       return;
@@ -216,9 +230,13 @@ export function useDemoController(options: UseDemoControllerOptions) {
 
     const task = createTask(
       `Demo ${migrationType === 'strong' ? 'Strong' : 'Weak'} Migration`,
-      '', // Code sẽ được lấy từ registry
+      '', // Code sẽ được bundle sau
       migrationType
     );
+
+    if (customCode) {
+      task.customCode = customCode;
+    }
 
     addTask(task);
     setCurrentTaskId(task.id);

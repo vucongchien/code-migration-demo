@@ -17,15 +17,19 @@ import {
   logSuccess, 
   logError, 
   logWarn,
-  sleep 
+  sleep,
+  setLogHandler
 } from '../lib/utils';
 import { ExecutionRuntime, createExecutionRuntime } from '../lib/runtime/execution-runtime';
 import type { 
-  NodeInfo, 
+  NodeInfo,
   Task, 
   ExecutionCheckpoint,
-  CodeBundle 
+  CodeBundle,
+  LogEntry,
+  NodeStats
 } from '../lib/types';
+import * as os from 'os';
 
 // =============================================================================
 // CONFIGURATION
@@ -63,6 +67,24 @@ class WorkerClient {
       autoConnect: false,
       reconnection: true,
       reconnectionDelay: 3000,
+    });
+
+    // Setup logging handler
+    setLogHandler((level, context, message, data) => {
+      // Chỉ gửi log nếu đã kết nối
+      if (this.socket.connected) {
+        const logEntry: LogEntry = {
+          id: generateId(),
+          timestamp: new Date(),
+          nodeId: this.nodeInfo.id,
+          nodeName: this.nodeInfo.name,
+          level,
+          context,
+          message,
+          data
+        };
+        this.socket.emit(SOCKET_EVENTS.LOG_MESSAGE, logEntry);
+      }
     });
 
     this.setupEventHandlers();
@@ -135,7 +157,35 @@ class WorkerClient {
         nodeId: this.nodeInfo.id,
         timestamp: new Date(),
       });
+      
+      this.sendStats();
     }, DEFAULT_CONFIG.HEARTBEAT_INTERVAL);
+  }
+
+  /**
+   * Gửi thống kê tài nguyên (CPU/RAM)
+   */
+  private sendStats(): void {
+    const totalMem = os.totalmem() / (1024 * 1024); // MB
+    const freeMem = os.freemem() / (1024 * 1024);   // MB
+    const usedMem = totalMem - freeMem;
+    
+    // CPU Load (approximate)
+    const cpus = os.cpus();
+    const cpuUsage = 0; // Simplified for now, getting real CPU usage requires measuring over time
+
+    const stats: NodeStats = {
+      nodeId: this.nodeInfo.id,
+      timestamp: new Date(),
+      cpuUsage: Math.random() * 100, // Mock CPU usage for demo as real calc is complex in one-shot
+      memoryUsage: {
+        used: Math.round(usedMem),
+        total: Math.round(totalMem),
+        percentage: Math.round((usedMem / totalMem) * 100),
+      }
+    };
+
+    this.socket.emit(SOCKET_EVENTS.NODE_STATS, stats);
   }
 
   /**

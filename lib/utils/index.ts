@@ -257,10 +257,27 @@ const LOG_PREFIXES = {
   success: '✅',
 };
 
+// Log handler type
+type LogHandler = (level: LogLevel, context: string, message: string, data?: unknown) => void;
+
+let remoteLogHandler: LogHandler | null = null;
+
+/**
+ * Set handler để gửi log ra ngoài (VD: qua socket)
+ */
+export function setLogHandler(handler: LogHandler): void {
+  remoteLogHandler = handler;
+}
+
 /**
  * Log với format đẹp
  */
 export function log(level: LogLevel, context: string, message: string, data?: unknown): void {
+  // Gửi qua remote handler nếu có
+  if (remoteLogHandler) {
+    remoteLogHandler(level, context, message, data);
+  }
+
   const timestamp = formatTimestamp(new Date());
   const prefix = LOG_PREFIXES[level];
   const color = LOG_COLORS[level];

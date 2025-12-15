@@ -71,6 +71,8 @@ export interface Task {
   name: string;
   /** Mã code cần thực thi (serialized) */
   code: string;
+  /** Custom code từ người dùng (nếu có) */
+  customCode?: string;
   /** Trạng thái hiện tại */
   status: TaskStatus;
   /** Loại migration được chỉ định */
@@ -387,4 +389,36 @@ export interface WorkerConfig extends NodeConfig {
   coordinatorAddress: string;
   /** Khoảng thời gian gửi heartbeat (ms) */
   heartbeatInterval: number;
+}
+
+// =============================================================================
+// LOGGING & STATS - Logging tập trung và thống kê
+// =============================================================================
+
+/**
+ * Một dòng log từ hệ thống
+ */
+export interface LogEntry {
+  id: string;
+  timestamp: Date;
+  nodeId: string;
+  nodeName: string;
+  level: 'info' | 'warn' | 'error' | 'debug' | 'success';
+  context: string;
+  message: string;
+  data?: unknown;
+}
+
+/**
+ * Thống kê tài nguyên của Node
+ */
+export interface NodeStats {
+  nodeId: string;
+  timestamp: Date;
+  cpuUsage: number;    // % usage
+  memoryUsage: {
+    used: number;      // MB
+    total: number;     // MB
+    percentage: number; // %
+  };
 }

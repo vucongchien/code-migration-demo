@@ -48,6 +48,10 @@ export const SOCKET_EVENTS = {
   // Broadcast
   BROADCAST_EVENT: 'broadcast:event',
   SYSTEM_UPDATE: 'system:update',
+  
+  // Logging & Stats
+  LOG_MESSAGE: 'log:message',
+  NODE_STATS: 'node:stats',
 } as const;
 
 // Export type cho event names

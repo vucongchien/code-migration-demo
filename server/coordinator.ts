@@ -13,15 +13,17 @@
 import { createServer } from 'http';
 import { Server, Socket } from 'socket.io';
 import { SOCKET_EVENTS, DEFAULT_CONFIG } from '../lib/constants';
-import { generateId, logInfo, logSuccess, logError, logWarn } from '../lib/utils';
+import { generateId, logInfo, logSuccess, logError, logWarn, setLogHandler } from '../lib/utils';
 import { getRegistry } from '../lib/registry/code-registry';
 import { MigrationManager } from '../lib/migration/migration-manager';
 import type { 
-  NodeInfo, 
+  NodeInfo,
   Task, 
   MigrationEvent,
   ExecutionCheckpoint,
-  CodeBundle 
+  CodeBundle,
+  LogEntry,
+  NodeStats
 } from '../lib/types';
 import { TaskRecoveryManager } from '../lib/recovery/task-recovery-manager';
 
@@ -89,6 +91,23 @@ class CoordinatorServer {
       broadcastEvent: (event) => this.broadcastEvent(event),
     });
 
+    // Setup logging handler
+    setLogHandler((level, context, message, data) => {
+      // Broadcast log cho monitor
+      const logEntry: LogEntry = {
+        id: generateId(),
+        timestamp: new Date(),
+        nodeId: 'coordinator',
+        nodeName: 'Coordinator',
+        level,
+        context,
+        message,
+        data
+      };
+      
+      this.io.to('monitor').emit(SOCKET_EVENTS.LOG_MESSAGE, logEntry);
+    });
+
     this.setupEventHandlers();
   }
 
@@ -102,6 +121,11 @@ class CoordinatorServer {
       // Node đăng ký
       socket.on(SOCKET_EVENTS.NODE_REGISTER, (data: { nodeInfo: NodeInfo }) => {
         this.handleNodeRegister(socket, data.nodeInfo);
+        
+        // Nếu là monitor, join room 'monitor'
+        if (data.nodeInfo.role === 'monitor') {
+          socket.join('monitor');
+        }
       });
 
       // Node heartbeat
@@ -148,6 +172,18 @@ class CoordinatorServer {
       // Checkpoint saved
       socket.on(SOCKET_EVENTS.CHECKPOINT_SAVED, (data: { checkpoint: ExecutionCheckpoint }) => {
         this.handleCheckpointSaved(data.checkpoint);
+      });
+
+      // Log message from worker
+      socket.on(SOCKET_EVENTS.LOG_MESSAGE, (logEntry: LogEntry) => {
+        // Forward to monitors
+        this.io.to('monitor').emit(SOCKET_EVENTS.LOG_MESSAGE, logEntry);
+      });
+
+      // Node stats from worker
+      socket.on(SOCKET_EVENTS.NODE_STATS, (stats: NodeStats) => {
+        // Broadcast to monitors
+        this.io.to('monitor').emit(SOCKET_EVENTS.NODE_STATS, stats);
       });
 
       // Disconnect

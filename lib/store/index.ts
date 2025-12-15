@@ -14,7 +14,9 @@ import type {
   Task, 
   MigrationEvent, 
   SystemStats,
-  ExecutionCheckpoint 
+  ExecutionCheckpoint,
+  LogEntry,
+  NodeStats
 } from '../types';
 
 // =============================================================================
@@ -27,6 +29,8 @@ interface SystemState {
   tasks: Task[];
   events: MigrationEvent[];
   checkpoints: ExecutionCheckpoint[];
+  logs: LogEntry[];
+  nodeStats: Record<string, NodeStats>;
   
   // UI State
   selectedTaskId: string | null;
@@ -57,6 +61,11 @@ interface SystemState {
   addCheckpoint: (checkpoint: ExecutionCheckpoint) => void;
   getCheckpoint: (taskId: string) => ExecutionCheckpoint | undefined;
   clearCheckpoints: (taskId: string) => void;
+
+  // Actions - Logs & Stats
+  addLog: (log: LogEntry) => void;
+  clearLogs: () => void;
+  updateNodeStats: (stats: NodeStats) => void;
   
   // Actions - UI State
   selectTask: (taskId: string | null) => void;
@@ -69,6 +78,7 @@ interface SystemState {
   getNodeById: (nodeId: string) => NodeInfo | undefined;
   getTaskById: (taskId: string) => Task | undefined;
   getWorkerNodes: () => NodeInfo[];
+  getLogsByNode: (nodeId: string) => LogEntry[];
 }
 
 // =============================================================================
@@ -94,6 +104,8 @@ export const useSystemStore = create<SystemState>()(
     tasks: [],
     events: [],
     checkpoints: [],
+    logs: [],
+    nodeStats: {},
     selectedTaskId: null,
     selectedNodeId: null,
     isConnected: false,
@@ -217,6 +229,25 @@ export const useSystemStore = create<SystemState>()(
     }),
 
     // =========================================================================
+    // LOG & STATS ACTIONS
+    // =========================================================================
+
+    addLog: (log) => set((state) => {
+      state.logs.unshift(log);
+      if (state.logs.length > 200) {
+        state.logs = state.logs.slice(0, 200);
+      }
+    }),
+
+    clearLogs: () => set((state) => {
+      state.logs = [];
+    }),
+
+    updateNodeStats: (stats) => set((state) => {
+      state.nodeStats[stats.nodeId] = stats;
+    }),
+
+    // =========================================================================
     // UI STATE ACTIONS
     // =========================================================================
     
@@ -262,6 +293,10 @@ export const useSystemStore = create<SystemState>()(
 
     getWorkerNodes: () => {
       return get().nodes.filter(n => n.role === 'worker');
+    },
+
+    getLogsByNode: (nodeId) => {
+      return get().logs.filter(l => l.nodeId === nodeId);
     },
   }))
 );
