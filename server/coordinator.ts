@@ -253,15 +253,41 @@ class CoordinatorServer {
       return;
     }
 
-    // Lấy code bundle
-    const codeBundle = this.registry.getBundle('counting-task');
+    // Xử lý code bundle
+    let codeBundle: CodeBundle | undefined;
+
+    if (task.customCode) {
+      // Nếu có custom code, tạo bundle tạm thời
+      codeBundle = {
+        id: `custom-bundle-${task.id}`,
+        name: `Custom Code for ${task.name}`,
+        description: 'Custom code submitted by user',
+        code: task.customCode,
+        version: '1.0.0',
+        checksum: 'custom', // TODO: Calculate actual checksum
+        createdAt: new Date(),
+      };
+      
+      // Update task code to match custom code
+      task.code = task.customCode;
+      
+      logInfo('Coordinator', `Using custom code for task ${task.id}`);
+    } else {
+      // Lấy default bundle
+      codeBundle = this.registry.getBundle('counting-task');
+    }
+
     if (!codeBundle) {
       logError('Coordinator', 'Không tìm thấy code bundle');
+      socket.emit(SOCKET_EVENTS.TASK_ERROR, { 
+        taskId: task.id, 
+        error: 'Không tìm thấy code bundle' 
+      });
       return;
     }
 
     // Gán task cho worker
-    this.assignTaskToNode(task, worker);
+    this.assignTaskToNode(task, worker, undefined, codeBundle);
 
     // Confirm cho submitter
     socket.emit(SOCKET_EVENTS.TASK_SUBMITTED, { taskId: task.id, assignedTo: worker.info.id });
@@ -273,13 +299,31 @@ class CoordinatorServer {
   /**
    * Helper: Assign task to specific worker
    */
-  public assignTaskToNode(task: Task, worker: ConnectedNode, checkpoint?: ExecutionCheckpoint): void {
-    const codeBundle = this.registry.getBundle('counting-task');
-    if (!codeBundle) return;
+  /**
+   * Helper: Assign task to specific worker
+   */
+  public assignTaskToNode(
+    task: Task, 
+    worker: ConnectedNode, 
+    checkpoint?: ExecutionCheckpoint,
+    overrideBundle?: CodeBundle
+  ): void {
+    let codeBundle: CodeBundle | undefined = overrideBundle;
+    
+    if (!codeBundle) {
+      codeBundle = this.registry.getBundle('counting-task');
+    }
+
+    if (!codeBundle) {
+      logError('Coordinator', `Cannot assign task ${task.id}: No code bundle found`);
+      return;
+    }
 
     task.status = 'running';
     task.currentNodeId = worker.info.id;
-    task.startedAt = new Date(); // Reset start time
+    if (!task.startedAt) {
+        task.startedAt = new Date();
+    }
     worker.info.status = 'busy';
 
     logInfo('Coordinator', `Gán task ${task.id} cho worker ${worker.info.name}`);
@@ -289,8 +333,6 @@ class CoordinatorServer {
       codeBundle,
       checkpoint,
     });
-
-
 
     // Broadcast updates
     this.broadcastSystemUpdate();
@@ -367,7 +409,22 @@ class CoordinatorServer {
     task.status = 'migrating';
 
     // Lấy code bundle
-    const codeBundle = this.registry.getBundle('counting-task');
+    let codeBundle: CodeBundle | undefined;
+
+    if (task.customCode) {
+        codeBundle = {
+            id: `custom-bundle-${task.id}`,
+            name: `Custom Code for ${task.name}`,
+            description: 'Custom code submitted by user',
+            code: task.customCode,
+            version: '1.0.0',
+            checksum: 'custom',
+            createdAt: new Date(),
+        };
+    } else {
+        codeBundle = this.registry.getBundle('counting-task');
+    }
+
     if (!codeBundle) {
       logError('Coordinator', 'Không tìm thấy code bundle');
       return;

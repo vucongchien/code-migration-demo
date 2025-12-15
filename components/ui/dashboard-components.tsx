@@ -274,7 +274,22 @@ interface SystemLogProps {
 }
 
 export function SystemLog({ logs, maxItems = 50 }: SystemLogProps) {
-  const displayLogs = logs.slice(0, maxItems);
+  const [filterLevel, setFilterLevel] = useState<string>('all');
+  const [filterNode, setFilterNode] = useState<string>('all');
+  const [searchTerm, setSearchTerm] = useState<string>('');
+
+  // Get unique nodes for filter
+  const uniqueNodes = Array.from(new Set(logs.map(l => l.nodeName))).sort();
+
+  const filteredLogs = logs.filter(log => {
+    if (filterLevel !== 'all' && log.level !== filterLevel) return false;
+    if (filterNode !== 'all' && log.nodeName !== filterNode) return false;
+    if (searchTerm && !log.message.toLowerCase().includes(searchTerm.toLowerCase()) && 
+        !log.context.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+    return true;
+  });
+
+  const displayLogs = filteredLogs.slice(0, maxItems);
 
   const getLogColor = (level: LogEntry['level']) => {
     switch (level) {
@@ -288,9 +303,44 @@ export function SystemLog({ logs, maxItems = 50 }: SystemLogProps) {
 
   return (
     <div className="h-full flex flex-col font-mono text-xs">
+      {/* Filters */}
+      <div className="flex gap-2 mb-2 p-1 bg-white/5 rounded">
+        <select 
+          value={filterLevel}
+          onChange={(e) => setFilterLevel(e.target.value)}
+          className="bg-black/20 text-gray-200 rounded px-2 py-1 border border-white/10 outline-none focus:border-blue-500"
+        >
+          <option value="all">All Levels</option>
+          <option value="info">Info</option>
+          <option value="warn">Warn</option>
+          <option value="error">Error</option>
+          <option value="success">Success</option>
+          <option value="debug">Debug</option>
+        </select>
+
+        <select 
+          value={filterNode}
+          onChange={(e) => setFilterNode(e.target.value)}
+          className="bg-black/20 text-gray-200 rounded px-2 py-1 border border-white/10 outline-none focus:border-blue-500 max-w-[120px]"
+        >
+          <option value="all">All Nodes</option>
+          {uniqueNodes.map(node => (
+            <option key={node} value={node}>{node}</option>
+          ))}
+        </select>
+
+        <input
+          type="text"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          placeholder="Search logs..."
+          className="flex-1 bg-black/20 text-gray-200 rounded px-2 py-1 border border-white/10 outline-none focus:border-blue-500"
+        />
+      </div>
+
       {displayLogs.length === 0 ? (
         <div className="flex-1 flex items-center justify-center text-gray-400 italic">
-          No logs available
+          No logs match filters
         </div>
       ) : (
         <div className="space-y-1 overflow-auto max-h-[400px]">
@@ -495,34 +545,44 @@ export function DemoControlPanel({
       <div className="mb-4">
         <button
           onClick={() => setShowEditor(!showEditor)}
-          className="text-sm font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1"
+          className="w-full flex items-center justify-between p-3 bg-gray-50 hover:bg-gray-100 rounded-xl transition-colors text-sm font-medium text-gray-700 mb-2 border border-gray-200"
         >
-          {showEditor ? '🔽 Hide Code Editor' : '▶️ Show Code Editor'}
+          <span className="flex items-center gap-2">
+            📝 Custom Code Editor
+            {showEditor && <span className="text-xs text-green-600 font-normal">(Active)</span>}
+          </span>
+          <span className="text-gray-400">{showEditor ? '🔽' : '▶️'}</span>
         </button>
         
         {showEditor && (
           <div className="mt-2 space-y-2 animate-in slide-in-from-top-2 duration-200">
-            <div className="flex gap-2">
+            <div className="flex gap-2 mb-2">
+              <span className="text-xs font-medium text-gray-500 self-center">Templates:</span>
               <button 
                 onClick={() => setCustomCode(DEMO_CODE_TEMPLATES.COUNTING_TASK)}
-                className="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded border border-gray-300"
+                className="text-xs px-3 py-1.5 bg-white hover:bg-blue-50 text-gray-700 hover:text-blue-600 rounded-lg border border-gray-200 transition-colors shadow-sm"
               >
-                Load Counting Task
+                🔢 Counting (1-100)
               </button>
               <button 
                  onClick={() => setCustomCode(DEMO_CODE_TEMPLATES.SUM_TASK)}
-                 className="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded border border-gray-300"
+                 className="text-xs px-3 py-1.5 bg-white hover:bg-blue-50 text-gray-700 hover:text-blue-600 rounded-lg border border-gray-200 transition-colors shadow-sm"
               >
-                Load Sum Task
+                ∑ Sum Calculation
               </button>
             </div>
-            <textarea
-              value={customCode}
-              onChange={(e) => setCustomCode(e.target.value)}
-              className="w-full h-48 p-3 text-xs font-mono bg-gray-900 text-green-400 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-              placeholder="// Enter custom task code here..."
-              spellCheck={false}
-            />
+            <div className="relative">
+              <textarea
+                value={customCode}
+                onChange={(e) => setCustomCode(e.target.value)}
+                className="w-full h-48 p-4 text-xs font-mono bg-[#1e1e1e] text-[#d4d4d4] rounded-xl border border-gray-300 focus:ring-2 focus:ring-blue-500 outline-none shadow-inner resize-none"
+                placeholder="// Enter custom task code here..."
+                spellCheck={false}
+              />
+              <div className="absolute top-2 right-2 text-[10px] text-gray-500 bg-black/20 px-2 py-1 rounded">
+                JavaScript/TypeScript
+              </div>
+            </div>
           </div>
         )}
       </div>
