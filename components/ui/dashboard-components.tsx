@@ -562,13 +562,32 @@ export function DemoControlPanel({
                 onClick={() => setCustomCode(DEMO_CODE_TEMPLATES.COUNTING_TASK)}
                 className="text-xs px-3 py-1.5 bg-white hover:bg-blue-50 text-gray-700 hover:text-blue-600 rounded-lg border border-gray-200 transition-colors shadow-sm"
               >
-                🔢 Counting (1-100)
+                🔢 Counting
               </button>
               <button 
                  onClick={() => setCustomCode(DEMO_CODE_TEMPLATES.SUM_TASK)}
                  className="text-xs px-3 py-1.5 bg-white hover:bg-blue-50 text-gray-700 hover:text-blue-600 rounded-lg border border-gray-200 transition-colors shadow-sm"
               >
-                ∑ Sum Calculation
+                ∑ Sum
+              </button>
+              <button 
+                 onClick={() => setCustomCode(DEMO_CODE_TEMPLATES.WEATHER_SEARCH_TASK)}
+                 className="text-xs px-3 py-1.5 bg-white hover:bg-blue-50 text-gray-700 hover:text-blue-600 rounded-lg border border-gray-200 transition-colors shadow-sm"
+              >
+                🌦️ Weather
+              </button>
+              <button 
+                 onClick={() => setCustomCode(DEMO_CODE_TEMPLATES.COMPLEX_COUNTING_TASK)}
+                 className="text-xs px-3 py-1.5 bg-white hover:bg-blue-50 text-gray-700 hover:text-blue-600 rounded-lg border border-gray-200 transition-colors shadow-sm"
+              >
+                ⚡ Complex
+              </button>
+              <button 
+                 onClick={() => setCustomCode(DEMO_CODE_TEMPLATES.NO_CHECKPOINT_TASK)}
+                 className="text-xs px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-700 rounded-lg border border-red-200 transition-colors shadow-sm"
+                 title="Demonstrate migration failure/restart without checkpoint"
+              >
+                💀 No CP
               </button>
             </div>
             <div className="relative">

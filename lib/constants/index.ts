@@ -213,6 +213,192 @@ async function sumTask(context) {
   return { success: true, finalSum: sum };
 }
 `,
+
+  /**
+   * Demo tìm kiếm thời tiết (Giả lập I/O bound & API Latency)
+   * Minh họa: Checkpoint lưu danh sách kết quả đã có, Resume bỏ qua cái đã xong.
+   */
+  WEATHER_SEARCH_TASK: `
+// Demo Task: Tìm kiếm thời tiết các thành phố
+// Mô phỏng I/O bound task với network latency
+async function main(context) {
+  const cities = ['Hà Nội', 'TP. Hồ Chí Minh', 'Đà Nẵng', 'Hải Phòng', 'Cần Thơ', 'Huế', 'Nha Trang', 'Đà Lạt'];
+  const { stepDelay = 1500 } = context.params;
+  
+  // Khôi phục state từ checkpoint (nếu có)
+  // results: danh sách các thành phố đã lấy xong dữ liệu
+  let results = context.checkpoint?.variables?.results || [];
+  let processedCount = results.length;
+  
+  context.reportProgress({
+    currentStep: processedCount,
+    totalSteps: cities.length,
+    message: processedCount > 0 
+      ? \`Khôi phục: Đã có dữ liệu của \${processedCount} thành phố. Tiếp tục...\`
+      : 'Bắt đầu tìm kiếm thời tiết...'
+  });
+  
+  if (processedCount > 0) {
+    await context.sleep(1000); // Delay để người dùng kịp đọc thông báo khôi phục
+  }
+
+  // Chỉ xử lý các thành phố chưa có trong results
+  for (let i = processedCount; i < cities.length; i++) {
+    const city = cities[i];
+    
+    // 1. Báo cáo đang xử lý
+    context.reportProgress({
+      currentStep: i,
+      totalSteps: cities.length,
+      message: \`Đang lấy dữ liệu thời tiết tại: \${city}...\`
+    });
+    
+    // 2. Mock API Call (Giả lập latency mạng)
+    await context.sleep(stepDelay); // Giả lập mạng chậm
+    
+    // Mock dữ liệu trả về logic ngẫu nhiên
+    const temp = Math.floor(Math.random() * (35 - 20) + 20);
+    const humidity = Math.floor(Math.random() * (90 - 60) + 60);
+    const condition = ['Nắng', 'Mưa', 'Nhiều mây', 'Có giông'][Math.floor(Math.random() * 4)];
+    
+    const weatherData = { city, temp, humidity, condition, timestamp: Date.now() };
+    results.push(weatherData);
+    
+    // 3. Quan trọng: Save Checkpoint ngay sau khi xong 1 unit of work (1 thành phố)
+    // Lưu ý: Với task dạng này, ta nên save checkpoint SAU MỖI ITEM thành công
+    // để đảm bảo không bao giờ phải gọi API lại cho item đó.
+    await context.saveCheckpoint({
+      currentStep: i + 1, // Đánh dấu là đã xong step này
+      variables: { results } // Lưu toàn bộ mảng kết quả
+    });
+    
+    context.reportProgress({
+      currentStep: i + 1,
+      totalSteps: cities.length,
+      message: \`✅ Đã xong \${city}: \${temp}°C, \${condition}\`
+    });
+
+    // 4. Kiểm tra Pause
+    if (context.isPaused()) {
+      return { paused: true, at: city, currentResults: results.length };
+    }
+  }
+  
+  return { success: true, totalProcessed: results.length, data: results };
+}
+`,
+
+  /**
+   * Demo tính toán nặng (Prime Check) - CÓ Checkpoint
+   * Minh họa: CPU bound task + Correct Checkpoint implementation
+   */
+  COMPLEX_COUNTING_TASK: `
+// Demo Task: Tìm số nguyên tố (CPU Bound) - CÓ CHECKPOINT
+// Minh họa Best Practice: Luôn check và save checkpoint trong vòng lặp nặng
+async function main(context) {
+  const { startFrom = 1, endAt = 500, stepDelay = 100 } = context.params;
+  
+  // Khôi phục state
+  let current = context.checkpoint?.variables?.current || startFrom;
+  let primesFound = context.checkpoint?.variables?.primesFound || [];
+  
+  function isPrime(num) {
+    if (num <= 1) return false;
+    if (num <= 3) return true;
+    if (num % 2 === 0 || num % 3 === 0) return false;
+    for (let i = 5; i * i <= num; i += 6) {
+      if (num % i === 0 || num % (i + 2) === 0) return false;
+    }
+    return true;
+  }
+
+  while (current <= endAt) {
+    // Logic tính toán
+    const prime = isPrime(current);
+    if (prime) {
+      primesFound.push(current);
+    }
+    
+    // Report UI
+    context.reportProgress({
+      currentStep: current,
+      totalSteps: endAt,
+      message: \`Checking \${current}... (Tìm thấy \${primesFound.length} số NT)\`
+    });
+    
+    // --- CHECKPOINT SECTION ---
+    // Vì đây là task nặng, ta nên check shouldCheckpoint thường xuyên
+    if (context.shouldCheckpoint()) {
+      await context.saveCheckpoint({
+        currentStep: current,
+        variables: { current, primesFound }
+      });
+    }
+    // --------------------------
+    
+    await context.sleep(stepDelay); // Giúp dễ quan sát
+    
+    if (context.isPaused()) {
+      return { paused: true, at: current, primesCount: primesFound.length };
+    }
+    
+    current++;
+  }
+  
+  return { success: true, totalPrimes: primesFound.length };
+}
+`,
+
+  /**
+   * Demo tính toán nặng - KHÔNG CÓ Checkpoint (Bad Practice)
+   * Minh họa: Khi Developer quên implement checkpoint, Strong Migration sẽ fail (về logic) 
+   * và hệ thống sẽ phải chạy lại từ đầu (như Weak Migration) khi sang node mới.
+   */
+  NO_CHECKPOINT_TASK: `
+// Demo Task: Tìm số nguyên tố (CPU Bound) - KHÔNG CHECKPOINT
+// Minh họa Bad Practice: Code không hỗ trợ lưu state
+async function main(context) {
+  const { startFrom = 1, endAt = 500, stepDelay = 100 } = context.params;
+  
+  // LỖI 1: Không check context.checkpoint để khôi phục
+  // Khi resume ở node mới, nó sẽ luôn bắt đầu lại từ startFrom (1)
+  let current = startFrom; 
+  let primesFound = [];
+  
+  // Hàm check giống hệt bên trên
+  function isPrime(num) {
+    if (num <= 1) return false;
+    if (num <= 3) return true;
+    for (let i = 5; i * i <= num; i += 6) {
+        if (num % i === 0 || num % (i + 2) === 0) return false;
+    }
+    return true;
+  }
+
+  while (current <= endAt) {
+    if (isPrime(current)) primesFound.push(current);
+    
+    context.reportProgress({
+      currentStep: current,
+      totalSteps: endAt,
+      message: \`Checking \${current}... (Tìm thấy \${primesFound.length} số NT)\`
+    });
+    
+    // LỖI 2: Không gọi context.saveCheckpoint()
+    // Hệ thống sẽ không bao giờ lưu được tiến độ trung gian.
+    
+    await context.sleep(stepDelay);
+    
+    if (context.isPaused()) {
+      return { paused: true, at: current };
+    }
+    
+    current++;
+  }
+  
+  return { success: true, totalPrimes: primesFound.length };
+}
+`,
 } as const;
 
 // =============================================================================
