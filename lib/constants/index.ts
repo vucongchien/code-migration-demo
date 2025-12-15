@@ -64,18 +64,22 @@ export type SocketEventName = typeof SOCKET_EVENTS[keyof typeof SOCKET_EVENTS];
 export const DEFAULT_CONFIG = {
   // Coordinator defaults
   COORDINATOR_PORT: 3001,
-  HEARTBEAT_TIMEOUT: 5000,        // 5 giây (Giảm để test nhanh hơn)
+  HEARTBEAT_TIMEOUT: 4000,        // 4 giây (Timeout cho heartbeat 1s)
   CHECK_INTERVAL: 2000,           // 2 giây
 
   // Worker defaults
   WORKER_PORT: 3002,
-  HEARTBEAT_INTERVAL: 3000,       // 3 giây
+  HEARTBEAT_INTERVAL: 1000,       // 1 giây (Tăng tần suất để check CPU chính xác hơn)
 
   // Registry defaults
   REGISTRY_PORT: 3003,
 
   // Checkpoint defaults
   CHECKPOINT_INTERVAL_STEPS: 10,  // Mỗi 10 steps tạo 1 checkpoint
+
+  // Auto Migration defaults
+  AUTO_MIGRATION_CPU_THRESHOLD: 90, // % CPU
+  AUTO_MIGRATION_DURATION_MS: 5000, // 5 giây liên tục
 
   // Demo task defaults
   DEMO_TASK_TOTAL_STEPS: 100,     // Demo đếm từ 1 đến 100

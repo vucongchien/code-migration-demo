@@ -12,8 +12,8 @@
 
 import { createServer } from 'http';
 import { Server, Socket } from 'socket.io';
-import { SOCKET_EVENTS, DEFAULT_CONFIG } from '../lib/constants';
-import { generateId, logInfo, logSuccess, logError, logWarn, setLogHandler } from '../lib/utils';
+import { SOCKET_EVENTS, DEFAULT_CONFIG, MIGRATION_MESSAGES } from '../lib/constants';
+import { generateId, logInfo, logSuccess, logError, logWarn, setLogHandler, createMigrationEvent } from '../lib/utils';
 import { getRegistry } from '../lib/registry/code-registry';
 import { MigrationManager } from '../lib/migration/migration-manager';
 import type { 
@@ -46,6 +46,7 @@ class CoordinatorServer {
   private io: Server;
   private nodes: Map<string, ConnectedNode> = new Map();
   private tasks: Map<string, Task> = new Map();
+  private nodeStatsHistory: Map<string, NodeStats[]> = new Map();
   private registry = getRegistry();
   private migrationManager: MigrationManager;
   private recoveryManager: TaskRecoveryManager;
@@ -182,8 +183,7 @@ class CoordinatorServer {
 
       // Node stats from worker
       socket.on(SOCKET_EVENTS.NODE_STATS, (stats: NodeStats) => {
-        // Broadcast to monitors
-        this.io.to('monitor').emit(SOCKET_EVENTS.NODE_STATS, stats);
+        this.handleNodeStats(stats);
       });
 
       // Disconnect
@@ -440,6 +440,98 @@ class CoordinatorServer {
     }
 
     this.broadcastNodeList();
+  }
+
+  private handleNodeStats(stats: NodeStats): void {
+    // 1. Broadcast to monitors
+    this.io.to('monitor').emit(SOCKET_EVENTS.NODE_STATS, stats);
+
+    // 2. Store stats
+    if (!this.nodeStatsHistory.has(stats.nodeId)) {
+      this.nodeStatsHistory.set(stats.nodeId, []);
+    }
+    const history = this.nodeStatsHistory.get(stats.nodeId)!;
+    
+    // Convert string timestamp to Date if needed
+    const statsWithDate = {
+        ...stats,
+        timestamp: new Date(stats.timestamp)
+    };
+    history.push(statsWithDate);
+
+    // 3. Prune old stats (keep last 30s)
+    const now = Date.now();
+    const thirtySecondsAgo = now - 30000;
+    while(history.length > 0 && history[0].timestamp.getTime() < thirtySecondsAgo) {
+      history.shift();
+    }
+
+    // 4. Check migration rules
+    this.checkAutoMigration(stats.nodeId);
+  }
+
+  private async checkAutoMigration(nodeId: string): Promise<void> {
+    const history = this.nodeStatsHistory.get(nodeId);
+    if (!history) return;
+
+    // Filter stats trong window duration (5s)
+    const now = Date.now();
+    const windowStart = now - DEFAULT_CONFIG.AUTO_MIGRATION_DURATION_MS;
+    
+    const relevantStats = history.filter(s => s.timestamp.getTime() >= windowStart);
+
+    // Nếu chưa đủ dữ liệu (VD: mới chạy 1s) -> skip
+    // Cần ít nhất 80% số mẫu expected trong khoảng thời gian đó
+    // (VD: 5s, interval 1s => expected 5 mẫu. Có > 3 mẫu là ok)
+    const expectedSamples = DEFAULT_CONFIG.AUTO_MIGRATION_DURATION_MS / DEFAULT_CONFIG.HEARTBEAT_INTERVAL;
+    if (relevantStats.length < expectedSamples * 0.8) return;
+
+    // Check CPU threshold
+    const isOverloaded = relevantStats.every(s => s.cpuUsage > DEFAULT_CONFIG.AUTO_MIGRATION_CPU_THRESHOLD);
+
+    if (isOverloaded) {
+      // Tìm task đang chạy trên node này
+      const runningTask = Array.from(this.tasks.values()).find(
+        t => t.currentNodeId === nodeId && t.status === 'running'
+      );
+
+      if (runningTask) {
+        logWarn('Coordinator', `⚠️ Node ${nodeId} quá tải (CPU > ${DEFAULT_CONFIG.AUTO_MIGRATION_CPU_THRESHOLD}%). Kích hoạt Auto Migration!`);
+
+        // Tìm node đích
+        const targetNode = this.findAutoMigrationTarget(nodeId);
+        
+        if (targetNode) {
+          // Trigger Strong Migration
+          await this.handleMigrationRequest({
+            taskId: runningTask.id,
+            sourceNodeId: nodeId,
+            targetNodeId: targetNode.info.id,
+            migrationType: 'strong' // Luôn dùng Strong cho Auto Migration
+          });
+
+          // Clear history để không trigger liên tục
+          this.nodeStatsHistory.set(nodeId, []);
+        } else {
+          logWarn('Coordinator', 'Không tìm thấy node đích phù hợp để di trú.');
+        }
+      }
+    }
+  }
+
+  private findAutoMigrationTarget(excludeNodeId: string): ConnectedNode | undefined {
+    // Tìm worker online, khác node nguồn, và (lý tưởng nhất) là không quá tải
+    // Ở đây demo simple: cứ khác node nguồn là được
+    for (const node of this.nodes.values()) {
+      if (
+        node.info.role === 'worker' && 
+        node.info.status === 'online' && 
+        node.info.id !== excludeNodeId
+      ) {
+        return node;
+      }
+    }
+    return undefined;
   }
 
   // ===========================================================================
