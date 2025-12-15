@@ -253,9 +253,27 @@ export class ExecutionRuntime {
     logInfo('Runtime', `Pause requested cho task ${this.taskId}`);
     this.isPausedFlag = true;
     
-    // Nếu cần lưu checkpoint khi pause
-    if (this.checkpointConfig.saveOnPause && this.latestCheckpoint) {
-      return this.latestCheckpoint;
+    // FORCE CREATE SNAPSHOT (Real-time Snapshot)
+    // Thay vì trả về latestCheckpoint cũ, ta tạo cái mới ngay tại thời điểm này
+    if (this.checkpointConfig.saveOnPause) {
+        logInfo('Runtime', `Creating forced snapshot for pause...`);
+        
+        const snapshot = createCheckpoint(
+            this.taskId,
+            this.currentStep,
+            this.totalSteps,
+            {}, // TODO: Capture variables if needed
+            this.nodeId,
+            { reason: 'forced_snapshot_on_pause' }
+        );
+        
+        // Cập nhật checksum & timestamp
+        // Lưu ý: createCheckpoint đã có logic checksum ở utils mới, 
+        // nhưng ta cần đảm bảo logic gọi nó đúng.
+        
+        this.latestCheckpoint = snapshot;
+        this.callbacks.onCheckpoint?.(snapshot);
+        return snapshot;
     }
     
     return this.latestCheckpoint;
