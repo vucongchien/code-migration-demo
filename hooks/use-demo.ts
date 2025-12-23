@@ -168,6 +168,19 @@ export function useSocketConnection(options: UseSocketConnectionOptions) {
     };
   }, [options.autoConnect, connect, disconnect]);
 
+  // Heartbeat loop
+  useEffect(() => {
+    if (!isConnected || !socketRef.current) return;
+
+    const interval = setInterval(() => {
+      socketRef.current?.emit(SOCKET_EVENTS.NODE_HEARTBEAT, {
+        nodeId: options.nodeId,
+      });
+    }, DEFAULT_CONFIG.HEARTBEAT_INTERVAL);
+
+    return () => clearInterval(interval);
+  }, [isConnected, options.nodeId]);
+
   // Emit functions
   const submitTask = useCallback((task: Task) => {
     socketRef.current?.emit(SOCKET_EVENTS.TASK_SUBMIT, { task });

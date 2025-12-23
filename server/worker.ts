@@ -11,19 +11,19 @@
 
 import { io, Socket } from 'socket.io-client';
 import { SOCKET_EVENTS, DEFAULT_CONFIG } from '../lib/constants';
-import { 
-  generateId, 
-  logInfo, 
-  logSuccess, 
-  logError, 
+import {
+  generateId,
+  logInfo,
+  logSuccess,
+  logError,
   logWarn,
   sleep,
   setLogHandler
 } from '../lib/utils';
 import { ExecutionRuntime, createExecutionRuntime } from '../lib/runtime/execution-runtime';
-import type { 
+import type {
   NodeInfo,
-  Task, 
+  Task,
   ExecutionCheckpoint,
   CodeBundle,
   LogEntry,
@@ -39,6 +39,29 @@ const WORKER_ID = process.env.WORKER_ID || `worker-${generateId().slice(0, 8)}`;
 const WORKER_NAME = process.env.WORKER_NAME || `Worker ${WORKER_ID.slice(-8)}`;
 const COORDINATOR_URL = process.env.COORDINATOR_URL || `http://localhost:${DEFAULT_CONFIG.COORDINATOR_PORT}`;
 const WORKER_PORT = parseInt(process.env.WORKER_PORT || String(DEFAULT_CONFIG.WORKER_PORT));
+
+/**
+ * Lấy địa chỉ IP thực của máy Worker
+ */
+function getLocalIPAddress(): string {
+  const networkInterfaces = os.networkInterfaces();
+
+  for (const interfaceName of Object.keys(networkInterfaces)) {
+    const interfaces = networkInterfaces[interfaceName];
+    if (!interfaces) continue;
+
+    for (const iface of interfaces) {
+      // Bỏ qua IPv6 và loopback (127.0.0.1)
+      if (iface.family === 'IPv4' && !iface.internal) {
+        return iface.address;
+      }
+    }
+  }
+
+  return 'localhost'; // Fallback nếu không tìm thấy
+}
+
+const LOCAL_IP = getLocalIPAddress();
 
 // =============================================================================
 // WORKER CLIENT CLASS
@@ -57,7 +80,7 @@ class WorkerClient {
       name: WORKER_NAME,
       role: 'worker',
       status: 'offline',
-      address: `localhost:${WORKER_PORT}`,
+      address: `${LOCAL_IP}:${WORKER_PORT}`,
       joinedAt: new Date(),
     };
 
@@ -71,7 +94,7 @@ class WorkerClient {
 
     // Setup logging handler
     setLogHandler((level, context, message, data) => {
-      // Chỉ gửi log nếu đã kết nối
+// Chỉ gửi log nếu đã kết nối
       if (this.socket.connected) {
         const logEntry: LogEntry = {
           id: generateId(),
@@ -98,10 +121,10 @@ class WorkerClient {
     this.socket.on('connect', () => {
       this.nodeInfo.status = 'online';
       logSuccess('Worker', `Đã kết nối đến Coordinator! Socket ID: ${this.socket.id}`);
-      
+
       // Đăng ký với Coordinator
       this.registerWithCoordinator();
-      
+
       // Bắt đầu heartbeat
       this.startHeartbeat();
     });
@@ -122,10 +145,10 @@ class WorkerClient {
     });
 
     // Task events
-    this.socket.on(SOCKET_EVENTS.TASK_ASSIGN, async (data: { 
-      task: Task; 
-      codeBundle: CodeBundle; 
-      checkpoint?: ExecutionCheckpoint 
+    this.socket.on(SOCKET_EVENTS.TASK_ASSIGN, async (data: {
+      task: Task;
+      codeBundle: CodeBundle;
+      checkpoint?: ExecutionCheckpoint
     }) => {
       await this.handleTaskAssignment(data.task, data.codeBundle, data.checkpoint);
     });
@@ -157,7 +180,7 @@ class WorkerClient {
         nodeId: this.nodeInfo.id,
         timestamp: new Date(),
       });
-      
+
       this.sendStats();
     }, DEFAULT_CONFIG.HEARTBEAT_INTERVAL);
   }
@@ -169,14 +192,14 @@ class WorkerClient {
     const totalMem = os.totalmem() / (1024 * 1024); // MB
     const freeMem = os.freemem() / (1024 * 1024);   // MB
     const usedMem = totalMem - freeMem;
-    
+
     // CPU Load (approximate)
     const cpus = os.cpus();
     const cpuUsage = 0; // Simplified for now, getting real CPU usage requires measuring over time
 
     const stats: NodeStats = {
       nodeId: this.nodeInfo.id,
-      timestamp: new Date(),
+timestamp: new Date(),
       cpuUsage: Math.random() * 100, // Mock CPU usage for demo as real calc is complex in one-shot
       memoryUsage: {
         used: Math.round(usedMem),
@@ -203,14 +226,14 @@ class WorkerClient {
   // ===========================================================================
 
   private async handleTaskAssignment(
-    task: Task, 
-    codeBundle: CodeBundle, 
+    task: Task,
+    codeBundle: CodeBundle,
     checkpoint?: ExecutionCheckpoint
   ): Promise<void> {
     logInfo('Worker', `=== NHẬN TASK MỚI ===`);
     logInfo('Worker', `Task: ${task.name} (${task.id})`);
     logInfo('Worker', `Migration type: ${task.migrationType}`);
-    
+
     if (checkpoint) {
       logInfo('Worker', `Resume từ checkpoint: step ${checkpoint.currentStep}`);
     } else {
@@ -254,12 +277,12 @@ class WorkerClient {
               taskId: task.id,
               result: result.data,
             });
-            
+
             // Reset status
             this.nodeInfo.status = 'online';
             this.currentTask = null;
             this.currentRuntime = null;
-            
+
             this.socket.emit(SOCKET_EVENTS.NODE_STATUS_UPDATE, {
               nodeId: this.nodeInfo.id,
               status: 'online',
@@ -267,7 +290,7 @@ class WorkerClient {
           }
         },
         onError: (error) => {
-          logError('Worker', `Task error: ${error.message}`);
+logError('Worker', `Task error: ${error.message}`);
           this.socket.emit(SOCKET_EVENTS.TASK_ERROR, {
             taskId: task.id,
             error: error.message,
@@ -309,7 +332,7 @@ class WorkerClient {
     // Pause runtime (Runtime sẽ tự động tạo checkpoint nếu được config saveOnPause=true)
     // Nhưng để chắc chắn cho migration, ta sẽ force tạo checkpoint mới nhất
     const checkpoint = await this.currentRuntime.pause();
-    
+
     this.nodeInfo.status = 'migrating';
     this.socket.emit(SOCKET_EVENTS.NODE_STATUS_UPDATE, {
       nodeId: this.nodeInfo.id,
@@ -320,14 +343,14 @@ class WorkerClient {
 
     // Nếu migration yêu cầu snapshot tức thì (Strong Migration)
     if (data.requireSnapshot && checkpoint) {
-        logInfo('Worker', `Sending snapshot for migration (Step: ${checkpoint.currentStep})`);
-        this.socket.emit(SOCKET_EVENTS.CHECKPOINT_SAVED, { checkpoint });
+      logInfo('Worker', `Sending snapshot for migration (Step: ${checkpoint.currentStep})`);
+      this.socket.emit(SOCKET_EVENTS.CHECKPOINT_SAVED, { checkpoint });
     }
   }
 
   private handleCheckpointRequest(taskId: string): void {
     logInfo('Worker', `Yêu cầu lưu checkpoint: ${taskId}`);
-    
+
     if (!this.currentRuntime || !this.currentTask) {
       logWarn('Worker', 'Không có task đang chạy');
       return;
@@ -355,7 +378,7 @@ class WorkerClient {
   }
 
   getNodeInfo(): NodeInfo {
-    return { ...this.nodeInfo };
+return { ...this.nodeInfo };
   }
 }
 
